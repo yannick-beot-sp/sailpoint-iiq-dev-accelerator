@@ -160,6 +160,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
   ctx.subscriptions.push(vscode.commands.registerCommand('iiq-dev-accelerator.refreshObject', () => iiqCommands.refreshObject()));
   ctx.subscriptions.push(vscode.commands.registerCommand('iiq-dev-accelerator.importJava', () => iiqCommands.importJava()));
   ctx.subscriptions.push(vscode.commands.registerCommand('iiq-dev-accelerator.exportObjects', () => iiqCommands.exportObjects()));
+  ctx.subscriptions.push(vscode.commands.registerCommand('iiq-dev-accelerator.exportObjectsFromExplorer', iiqCommands.exportObjectsFromExplorer, iiqCommands));
   ctx.subscriptions.push(vscode.commands.registerCommand('iiq-dev-accelerator.switchMode', () => iiqCommands.switchMode()));
 
   if (shouldStartLSP(ctx)) {

@@ -262,6 +262,10 @@
                 "title": "iiq: Export Objects"
             },
             {
+                "command": "iiq-dev-accelerator.exportObjectsFromExplorer",
+                "title": "iiq: Export Objects"
+            },
+            {
                 "command": "iiq-dev-accelerator.switchMode",
                 "title": "iiq: Switch Mode"
             }
@@ -269,6 +273,10 @@
         "commandPalette": [
             {
                 "command": "iiq-dev-accelerator.importFileFromExplorer",
+                "when": "never"
+            },
+            {
+                "command": "iiq-dev-accelerator.exportObjectsFromExplorer",
                 "when": "never"
             }
         ],
@@ -305,6 +313,11 @@
                     "command": "iiq-dev-accelerator.importFileFromExplorer",
                     "when": "resourceExtname == .xml || explorerResourceIsFolder",
                     "group": "iiq"
+                },
+                {
+                    "command": "iiq-dev-accelerator.exportObjectsFromExplorer",
+                    "when": "explorerResourceIsFolder",
+                    "group": "iiq@2"
                 }
             ],
             "editor/context": [

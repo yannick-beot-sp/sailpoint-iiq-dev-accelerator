@@ -536,6 +536,128 @@ export class IIQCommands {
     return this.postRequestInternal(post_body, url, username, password);
   }
 
+  public async exportObjectsFromExplorer(fileUri: vscode.Uri, selectedPaths: vscode.Uri[]): Promise<void> {
+    console.log("> exportObjectsFromExplorer", fileUri);
+
+    var classes = await this.getClasses();
+    if (!classes) {
+      vscode.window.showInformationMessage("No classes were found, exiting");
+      return;
+    }
+
+    const selectedClasses = await vscode.window.showQuickPick(classes,
+      { placeHolder: 'Pick classes that you want to export...', ignoreFocusOut: true, canPickMany: true });
+    if (!selectedClasses) {
+      // No classes was selected, exiting
+      return;
+    }
+
+    const whatToExport = await vscode.window.showQuickPick(
+      ["Export Everything", "Select what to export"],
+      { placeHolder: 'Which object do you want to export?', ignoreFocusOut: true, canPickMany: false });
+
+    if (whatToExport === undefined) {
+      return;
+    }
+    let objectsToExport = {};
+    let totalObjectCnt = 0;
+    ///// 
+    // Building the list of objects to export, depending on the previous choice: 
+    // all or selected?
+    /////
+    if (whatToExport === "Select what to export") {
+      for (const aClass of selectedClasses) {
+        let objects = await this.getClassObjects(aClass, false);
+        if (objects && objects.length > 0) {
+          const objNames = await vscode.window.showQuickPick(objects,
+            { placeHolder: `Select objects for ${aClass}...`, ignoreFocusOut: true, canPickMany: true });
+          if (objNames === undefined) {
+            return;
+          }
+          objectsToExport[aClass] = objNames
+          totalObjectCnt += objNames.length;
+        }
+      }
+    } else {
+      totalObjectCnt = await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: 'Collecting objects for class',
+        cancellable: true
+      }, async (progress, token) => {
+        const incr = 100 / selectedClasses.length;
+        progress.report({ increment: 0 });
+        for (const aClass of selectedClasses) {
+          if (token.isCancellationRequested) {
+            return -1;
+          }
+          progress.report({ increment: incr, message: `${aClass}` });
+          const objects = await this.getClassObjects(aClass, false);
+          if (objects && objects.length > 0) {
+            objectsToExport[aClass] = objects
+            totalObjectCnt += objects.length;
+          }
+        }
+        return totalObjectCnt;
+      });
+      if (totalObjectCnt === -1) {
+        // Cancelled, exiting
+        return;
+      }
+
+    }
+
+    const concatObjectFolder = await vscode.window.showQuickPick(
+      ["Yes", "No"],
+      { placeHolder: 'Do you want to put files in object folder?', ignoreFocusOut: true, canPickMany: false });
+    if (concatObjectFolder === undefined) {
+      return;
+    }
+
+    const useTokenization = await this.useTokenization();
+    const exportFolder = fileUri.fsPath;
+    ///// 
+    // Exporting objects 
+    ///// 
+    const exportedCount = await vscode.window.withProgress({
+      location: vscode.ProgressLocation.Notification,
+      title: 'Exporting',
+      cancellable: true
+    },
+      async (progress, token) => {
+        token.onCancellationRequested(() => {
+        });
+        let exportedCount = 0;
+        const incr = 100 / totalObjectCnt;
+        progress.report({ increment: 0 });
+        for (const aClass in objectsToExport) {
+          if (token.isCancellationRequested) {
+            break;
+          }
+          let classFolder = exportFolder;
+          if (concatObjectFolder === 'Yes') {
+            classFolder = path.join(exportFolder, aClass);
+            if (!fs.existsSync(classFolder)) {
+              fs.mkdirSync(classFolder);
+            }
+          }
+          for (const objName of objectsToExport[aClass]) {
+            if (token.isCancellationRequested) {
+              break;
+            }
+            progress.report({ increment: incr, message: `${aClass} "${objName}"` });
+            var xml = await this.searchObject(aClass, objName, false, useTokenization);
+            fs.writeFileSync(`${classFolder}/${objName}.xml`, xml, { encoding: 'utf8', flag: 'w' });
+            exportedCount++;
+          }
+        }
+        return exportedCount;
+      });
+
+    vscode.window.showInformationMessage(`${exportedCount} objects out of ${totalObjectCnt} were exported to ${exportFolder}`);
+
+  }
+
+
   public async importFileFromExplorer(fileUri: any, selectedPaths: vscode.Uri[]): Promise<void> {
     console.log("> importFileFromExplorer");
 
@@ -1960,6 +2082,20 @@ export class IIQCommands {
     }
   }
 
+  private async useTokenization(): Promise<UseTokenization> {
+    let useTokenization = UseTokenization.No;
+    let useTokenizationConfig = vscode.workspace.getConfiguration('iiq-dev-accelerator').get('useTokenization');
+    if (UseTokenization.Ask === useTokenizationConfig) {
+      const answer = await vscode.window.showQuickPick(["No", "Yes"], { placeHolder: 'Would you like to apply reverse tokenization?' });
+      if (answer === "Yes") {
+        useTokenization = UseTokenization.Yes;
+      }
+    } else if (UseTokenization.Yes === useTokenizationConfig) {
+      useTokenization = UseTokenization.Yes;
+    }
+    return useTokenization;
+  }
+
   public async exportObjects(){
     const defaultFolder = PathProposer.getExportedObjectsFolder((await this.getEnvironment()));
     const exportFolder = await vscode.window.showInputBox({
@@ -1993,16 +2129,8 @@ export class IIQCommands {
       vscode.window.showInformationMessage("No classes was selected, exiting");
       return;
     }
-    let useTokenization = UseTokenization.No;
-    let useTokenizationConfig = vscode.workspace.getConfiguration('iiq-dev-accelerator').get('useTokenization');
-    if(UseTokenization.Ask === useTokenizationConfig){
-      const answer = await vscode.window.showQuickPick(["No", "Yes"], {placeHolder: 'Would you like to apply reverse tokenization?'});
-      if(answer === "Yes"){
-        useTokenization = UseTokenization.Yes;
-      }
-    } else if(UseTokenization.Yes === useTokenizationConfig){
-      useTokenization = UseTokenization.Yes;
-    }
+
+    const useTokenization = await this.useTokenization();
 
     let objectsToExport = {};
     let totalObjectCnt = await vscode.window.withProgress({
