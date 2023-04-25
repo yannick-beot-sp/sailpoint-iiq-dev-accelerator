@@ -646,7 +646,7 @@ export class IIQCommands {
             }
             progress.report({ increment: incr, message: `${aClass} "${objName}"` });
             var xml = await this.searchObject(aClass, objName, false, useTokenization);
-            fs.writeFileSync(`${classFolder}/${objName}.xml`, xml, { encoding: 'utf8', flag: 'w' });
+            fs.writeFileSync(`${classFolder}/${aClass}-${objName}.xml`, xml, { encoding: 'utf8', flag: 'w' });
             exportedCount++;
           }
         }
