@@ -14,6 +14,7 @@ import {DOMParser, XMLSerializer} from '@xmldom/xmldom'
 import {API as GitAPI, Repository, GitExtension, Status} from './typings/git';
 import {PathProposer} from './pathProposer';
 import {beautifyIIQObject} from './xmlUtils';
+import { integer } from 'vscode-languageclient';
 
 const fg = require('fast-glob');
 
@@ -572,7 +573,7 @@ export class IIQCommands {
     },
       async (progress, token) =>{
         token.onCancellationRequested(() => {
-          //vscode.window.showInformationMessage(`Operation was cancelled`); 
+          //vscode.window.showInformationMessage(`Operation was cancelled`);
         });
         var incr = 100 / filesToDeploy.length;
         progress.report({increment: 0});
@@ -612,7 +613,7 @@ export class IIQCommands {
       }else{
         var failedFiles = Object.keys(result["failedFiles"]).
           map(key => key + (result["failedFiles"][key]["processFileErrors"].length > 0 ?
-            `\n - Following tokes couldn't be substituted: 
+            `\n - Following tokes couldn't be substituted:
             ${result["failedFiles"][key]["processFileErrors"]}` : "")).join("\n");
         await vscode.window.showInformationMessage(
           `${result["failed"]} files failed to deploy: \n\n${failedFiles}`,
@@ -642,12 +643,12 @@ export class IIQCommands {
     return undefined;
   }
 
-  private getClassFile(path, file): string {
-    var result = fg.sync(`${path}/**/${file}`);
+  private getClassFiles(path, file): string[] {
+    var result = fg.sync(`${path}/**/${file}*`);
     if(result.length == 0){
       return null;
     }
-    return result[0];
+    return result;
   }
 
   private async getIIQClassPath(): Promise<string> {
@@ -678,7 +679,8 @@ export class IIQCommands {
     var classPath = await this.getIIQClassPath();
     var outputClassDir = tmp.dirSync().name.replace(/\\/g, "/");
     var javaFile = vscode.window.activeTextEditor.document.fileName.replace(/\\/g, "/");
-    var classFileBaseName = path.basename(javaFile, '.java') + '.class';
+    //var classFileBaseName = path.basename(javaFile, '.java') + '.class';
+    var javaClassBase = path.basename(javaFile, '.java');
     var compilerPath = `javac`;
     var javaCompileOptions = `-source 1.8 -target 1.8`;
     const cmd = `${compilerPath} ${javaCompileOptions} -d ${outputClassDir} -cp ${classPath} ${javaFile}`;
@@ -711,65 +713,89 @@ export class IIQCommands {
       fs.rmdirSync(outputClassDir, {recursive: true});
       return;
     }
-    var classFile = this.getClassFile(outputClassDir, classFileBaseName);
-    if(!classFile){
-      vscode.window.showErrorMessage(`Couldn't file ${classFileBaseName} under ${outputClassDir}`);
+    var classFiles = this.getClassFiles(outputClassDir, javaClassBase);
+    if(!classFiles){
+      vscode.window.showErrorMessage(`Couldn't file ${javaClassBase} under ${outputClassDir}`);
       fs.rmdirSync(outputClassDir, {recursive: true});
       return;
     }
-    const classBytes = fs.readFileSync(classFile, {encoding: 'base64'});
-    fs.rmdirSync(outputClassDir, {recursive: true});
-    var relativeClassPath = path.relative(outputClassDir, classFile).replace(/\\/g, "/");
-    var clazzName = relativeClassPath.substring(0, relativeClassPath.search('.class')).replace(/\//g, ".");
-    var post_body =
-    {
-      "workflowArgs":
-      {
-        "operation": "importJava",
-        "clazzName": clazzName,
-        "clazzPath": relativeClassPath,
-        "clazzBytes": classBytes,
-        "debugPort": "8000",
-        "debugTransport": "dt_socket",
-        "host": "localhost"
-      }
-    };
 
+    var errorMessages = "";
+    var wasCancelled = false;
+    var successCount = 0;
+    const urls: string[] = await this.getURLs();
     var result = await vscode.window.withProgress({
       location: vscode.ProgressLocation.Notification,
-      title: "Importing Java Class... ",
+      title: `Uploading and hotswapping Java classes of ${javaClassBase}...\n`,
       cancellable: true
     },
-      async (progress, cancellationToken) => {
-        var result = await this.postRequest(JSON.stringify(post_body));
-        var uploadFailure = result["payload"]["uploadFailure"];
-        var hotswapFailure = result["payload"]["hotswapFailure"];
-        if(uploadFailure){
-          return `Java class upload failed: ${uploadFailure}`;
-        }
-        else if(hotswapFailure){
-          progress.report({message: `Please wait for the Tomcat app restart (HotSwap failed with error: ${hotswapFailure}). See the README for more info on that`});
-          await sleep(20000);
-          function sleep(ms){
-            return new Promise((resolve) => {
-              setTimeout(resolve, ms);
-            });
+      async (progress, token) => {
+        token.onCancellationRequested(() => {
+        });
+        var incr = 100 / classFiles.length;
+        progress.report({increment: 0});
+        for (const classFile of classFiles){
+          if(token.isCancellationRequested){
+            wasCancelled = true;
+            break;
           }
-          var version = await this.getWorkflowVersion(url, username, password);
-          if(version != "undefined"){
-            return "success";
+          var relativeClassPath = path.relative(outputClassDir, classFile).replace(/\\/g, "/");
+          var clazzName = relativeClassPath.substring(0, relativeClassPath.search('.class')).replace(/\//g, ".");
+          var clazzBytes = fs.readFileSync(classFile, {encoding: 'base64'});
+          progress.report({increment: incr, message: `Importing Java Class: ${clazzName}`});
+
+          var post_body =
+          {
+            "workflowArgs":
+            {
+              "operation": "importJava",
+              "clazzName": clazzName,
+              "clazzPath": relativeClassPath,
+              "clazzBytes": clazzBytes,
+              "debugPort": "8000",
+              "debugTransport": "dt_socket",
+              "host": "localhost"
+            }
+          };
+
+          var result = await this.postRequest(JSON.stringify(post_body));
+          var uploadFailure = result["payload"]["uploadFailure"];
+          var hotswapFailure = result["payload"]["hotswapFailure"];
+          if(uploadFailure){
+            errorMessages +=  `Java class upload failed: ${uploadFailure}`;
           }
-          else return "Timeout trying to get workflow version";
+          else if(hotswapFailure){
+            progress.report({message: `Please wait for the Tomcat app restart (HotSwap failed with error: ${hotswapFailure}). See the README for more info on that`});
+            await sleep(20000);
+            function sleep(ms){
+              return new Promise((resolve) => {
+                setTimeout(resolve, ms);
+              });
+            }
+            var version = await this.getWorkflowVersion(url, username, password);
+            if(version == "undefined"){
+              errorMessages += "Timeout trying to get workflow version";
+              return "failed";
+            }
+          }
+          else{
+            successCount++;
+          }
         }
-        return "success";
+        return "ok";
       });
 
-    if(result == "success"){
-      vscode.window.showInformationMessage(`Operation succeded!`);
+    if(wasCancelled){
+      vscode.window.showWarningMessage("Operation was cancelled");
+    }
+    else if(Number(successCount) < classFiles.length){
+      vscode.window.showErrorMessage("There was an error: " + errorMessages);
     }
     else{
-      vscode.window.showErrorMessage(`${result}`);
+      vscode.window.showInformationMessage(`Operation succeeded: ${successCount} files out of ${classFiles.length} were uploaded and hotswapped`);
     }
+    fs.rmdirSync(outputClassDir, {recursive: true});
+
   }
 
   public async importFile(fileContent = null, resolveTokens = true): Promise<[boolean, {}]> {
@@ -1015,7 +1041,7 @@ export class IIQCommands {
     //  location: vscode.ProgressLocation.Notification,
     //  title: `Retrieving information for ${ruleName}`,
     //  cancellable: true
-    //  }, 
+    //  },
     //  progress => {
     //    return this.postRequest(JSON.stringify(post_body));
     //  });

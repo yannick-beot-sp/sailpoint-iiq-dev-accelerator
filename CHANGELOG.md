@@ -1,7 +1,18 @@
 # Change Log
 
-## [UNRELEASED]
+## [1.0.46]
+### Updated
+- Dependabot: Bump xml2js from 0.4.23 to 0.5.0
 
+## [1.0.45]
+### Fixed
+- Made sure when Java class file is uploaded, the class path will be created
+
+## [1.0.44]
+### Fixed
+- Make sure that Java import takes care of inner classes too
+
+## [1.0.43]
 ### Added
 - Added the ability to sort by name or by last modified date (cf. https://github.com/lispercat/sailpoint-iiq-dev-accelerator/issues/44) 
 - Added snippets for rules (cf. https://github.com/lispercat/sailpoint-iiq-dev-accelerator/issues/42)
